@@ -9,11 +9,21 @@ app.use(express.json());
 
 // Route to get moonrise, moonset, illumination, distance, meridian passing times, opposite meridian passing, sunrise/sunset times, and times around moonrise and moonset
 app.get('/api/moon-times', (req, res) => {
-    const { latitude, longitude, year, month } = req.query;
+    const { location, year, month } = req.query;
+    const cleanlocation = location.replace(/\s+/g, '');
 
     // Validate input parameters
-    if (!latitude || !longitude || !year || !month) {
+    if (!location || !year || !month) {
         return res.status(400).json({ error: 'Latitude, Longitude, Year, and Month are required.' });
+    }
+
+    // แยก latitude และ longitude จาก location
+    const [latStr, lngStr] = cleanlocation.split(',');
+    const lat = parseFloat(latStr);
+    const lng = parseFloat(lngStr);
+
+    if (isNaN(lat) || isNaN(lng)) {
+        return res.status(400).json({ error: 'Invalid location format. Use "latitude,longitude".' });
     }
 
     // Convert the month to an integer and check for valid values
@@ -38,10 +48,10 @@ app.get('/api/moon-times', (req, res) => {
         date.setDate(day); // Set the current day
 
         // Get moonrise and moonset times using SunCalc
-        const moonTimes = SunCalc.getMoonTimes(date, parseFloat(latitude), parseFloat(longitude));
+        const moonTimes = SunCalc.getMoonTimes(date, parseFloat(lat), parseFloat(lng));
 
         // Get sunrise and sunset times using SunCalc
-        const sunTimes = SunCalc.getTimes(date, parseFloat(latitude), parseFloat(longitude));
+        const sunTimes = SunCalc.getTimes(date, parseFloat(lat), parseFloat(lng));
 
         // Calculate meridian passing (approximate midpoint between moonrise and moonset)
         let meridianPassing = null;
@@ -60,7 +70,7 @@ app.get('/api/moon-times', (req, res) => {
         const moonIllumination = illumination.fraction * 100; // Fraction as percentage
 
         // Get the distance between Earth and the Moon
-        const moonPosition = SunCalc.getMoonPosition(date, parseFloat(latitude), parseFloat(longitude));
+        const moonPosition = SunCalc.getMoonPosition(date, parseFloat(lat), parseFloat(lng));
         const moonDistance = moonPosition.distance; // Distance in meters
 
         // Format the date as yyyy/mm/dd
@@ -79,11 +89,11 @@ app.get('/api/moon-times', (req, res) => {
         const oppositeMeridianTime = oppositeMeridianPassing
             ? oppositeMeridianPassing.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
             : null;
-        
+
         const sunrise = sunTimes.sunrise
             ? sunTimes.sunrise.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
             : null;
-        
+
         const sunset = sunTimes.sunset
             ? sunTimes.sunset.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
             : null;
@@ -173,8 +183,8 @@ app.get('/api/moon-times', (req, res) => {
             : null;
 
 
-        
-            
+
+
         // Check if sunrise is between one hour before and one hour after meridian
         let huntStar = 0;
 
@@ -196,7 +206,7 @@ app.get('/api/moon-times', (req, res) => {
         // Major Times
         if (oneHourBeforeSunrise && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourBeforeSunrise, formattedOneHourBeforeMeridian, formattedOneHourAfterMeridian) ? huntStar + 3 : huntStar;
-        }       
+        }
 
         if (oneHourAfterSunrise && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourAfterSunrise, formattedOneHourBeforeMeridian, formattedOneHourAfterMeridian) ? huntStar + 3 : huntStar;
@@ -204,7 +214,7 @@ app.get('/api/moon-times', (req, res) => {
 
         if (oneHourBeforeSunrise && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourBeforeSunrise, formattedOneHourBeforeOppositeMeridian, formattedOneHourAfterOppositeMeridian) ? huntStar + 3 : huntStar;
-        }       
+        }
 
         if (oneHourAfterSunrise && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourAfterSunrise, formattedOneHourBeforeOppositeMeridian, formattedOneHourAfterOppositeMeridian) ? huntStar + 3 : huntStar;
@@ -213,7 +223,7 @@ app.get('/api/moon-times', (req, res) => {
         // Minor Times
         if (oneHourBeforeSunrise && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourBeforeSunrise, formattedThirtyMinutesBeforeMoonrise, formattedThirtyMinutesAfterMoonrise) ? huntStar + 2 : huntStar;
-        }       
+        }
 
         if (oneHourAfterSunrise && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourAfterSunrise, formattedThirtyMinutesBeforeMoonrise, formattedThirtyMinutesAfterMoonrise) ? huntStar + 2 : huntStar;
@@ -221,7 +231,7 @@ app.get('/api/moon-times', (req, res) => {
 
         if (oneHourBeforeSunrise && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourBeforeSunrise, formattedThirtyMinutesBeforeMoonset, formattedThirtyMinutesAfterMoonset) ? huntStar + 2 : huntStar;
-        }       
+        }
 
         if (oneHourAfterSunrise && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourAfterSunrise, formattedThirtyMinutesBeforeMoonset, formattedThirtyMinutesAfterMoonset) ? huntStar + 2 : huntStar;
@@ -247,7 +257,7 @@ app.get('/api/moon-times', (req, res) => {
         // Major Times
         if (oneHourBeforeSunset && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourBeforeSunset, formattedOneHourBeforeMeridian, formattedOneHourAfterMeridian) ? huntStar + 3 : huntStar;
-        }       
+        }
 
         if (oneHourAfterSunset && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourAfterSunset, formattedOneHourBeforeMeridian, formattedOneHourAfterMeridian) ? huntStar + 3 : huntStar;
@@ -255,7 +265,7 @@ app.get('/api/moon-times', (req, res) => {
 
         if (oneHourBeforeSunset && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourBeforeSunset, formattedOneHourBeforeOppositeMeridian, formattedOneHourAfterOppositeMeridian) ? huntStar + 3 : huntStar;
-        }       
+        }
 
         if (oneHourAfterSunset && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourAfterSunset, formattedOneHourBeforeOppositeMeridian, formattedOneHourAfterOppositeMeridian) ? huntStar + 3 : huntStar;
@@ -265,7 +275,7 @@ app.get('/api/moon-times', (req, res) => {
 
         if (oneHourBeforeSunset && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourBeforeSunset, formattedThirtyMinutesBeforeMoonrise, formattedThirtyMinutesAfterMoonrise) ? huntStar + 2 : huntStar;
-        }       
+        }
 
         if (oneHourAfterSunset && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourAfterSunset, formattedThirtyMinutesBeforeMoonrise, formattedThirtyMinutesAfterMoonrise) ? huntStar + 2 : huntStar;
@@ -273,7 +283,7 @@ app.get('/api/moon-times', (req, res) => {
 
         if (oneHourBeforeSunset && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourBeforeSunset, formattedThirtyMinutesBeforeMoonset, formattedThirtyMinutesAfterMoonset) ? huntStar + 2 : huntStar;
-        }       
+        }
 
         if (oneHourAfterSunset && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(formattedtoneHourAfterSunset, formattedThirtyMinutesBeforeMoonset, formattedThirtyMinutesAfterMoonset) ? huntStar + 2 : huntStar;
@@ -284,14 +294,14 @@ app.get('/api/moon-times', (req, res) => {
         // Major Times
         if (moonrise && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(moonrise, formattedOneHourBeforeMeridian, formattedOneHourAfterMeridian) ? huntStar + 0.5 : huntStar;
-        } 
+        }
         if (moonset && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(moonset, formattedOneHourBeforeMeridian, formattedOneHourAfterMeridian) ? huntStar + 0.5 : huntStar;
         }
 
         if (moonrise && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(moonrise, formattedOneHourBeforeOppositeMeridian, formattedOneHourAfterOppositeMeridian) ? huntStar + 0.5 : huntStar;
-        }       
+        }
 
         if (moonset && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(moonset, formattedOneHourBeforeOppositeMeridian, formattedOneHourAfterOppositeMeridian) ? huntStar + 0.5 : huntStar;
@@ -301,7 +311,7 @@ app.get('/api/moon-times', (req, res) => {
 
         if (moonrise && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(moonrise, formattedThirtyMinutesBeforeMoonrise, formattedThirtyMinutesAfterMoonrise) ? huntStar + 0.5 : huntStar;
-        }       
+        }
 
         if (moonset && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(moonset, formattedThirtyMinutesBeforeMoonrise, formattedThirtyMinutesAfterMoonrise) ? huntStar + 0.5 : huntStar;
@@ -309,7 +319,7 @@ app.get('/api/moon-times', (req, res) => {
 
         if (moonrise && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(moonrise, formattedThirtyMinutesBeforeMoonset, formattedThirtyMinutesAfterMoonset) ? huntStar + 0.5 : huntStar;
-        }       
+        }
 
         if (moonset && oneHourBeforeMeridian && oneHourAfterMeridian) {
             huntStar = isTimeBetween(moonset, formattedThirtyMinutesBeforeMoonset, formattedThirtyMinutesAfterMoonset) ? huntStar + 0.5 : huntStar;
@@ -322,12 +332,13 @@ app.get('/api/moon-times', (req, res) => {
 
 
 
-            
-        
-      
+
+
+
 
         // Prepare the result for the current day
         result.push({
+            location: cleanlocation,
             date: formattedDate, // Use formatted date in yyyy/mm/dd
             moonrise: moonrise,
             moonset: moonset,
@@ -335,8 +346,8 @@ app.get('/api/moon-times', (req, res) => {
             oppositeMeridianPassing: oppositeMeridianTime,
             sunrise: sunrise,
             sunset: sunset,
-            solarNoon: solarNoon, 
-            daylength: daylength, 
+            solarNoon: solarNoon,
+            daylength: daylength,
             thirtyMinutesBeforeMoonrise: formattedThirtyMinutesBeforeMoonrise,
             thirtyMinutesAfterMoonrise: formattedThirtyMinutesAfterMoonrise,
             thirtyMinutesBeforeMoonset: formattedThirtyMinutesBeforeMoonset,
@@ -347,9 +358,8 @@ app.get('/api/moon-times', (req, res) => {
             oneHourAfterOppositeMeridian: formattedOneHourAfterOppositeMeridian,
             illumination: moonIllumination.toFixed(2), // Show illumination as percentage
             distance: moonDistance.toFixed(2) + ' meters', // Show distance in meters
-
             huntStar: huntStar,
-    meridianTimesAvailable: (oneHourBeforeMeridian && oneHourAfterMeridian) ? true : false, // Optional additional info
+            meridianTimesAvailable: (oneHourBeforeMeridian && oneHourAfterMeridian) ? true : false, // Optional additional info
 
 
         });
