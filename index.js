@@ -161,11 +161,14 @@ app.get('/api/moon-times', (req, res) => {
 
 app.listen(port, () => { console.log(`Server running at http://localhost:${port}`); });
 
-// แก้บั๊ก #1: เทียบด้วย Date timestamp ตรง ๆ (ไม่แปลงเป็นสตริง "HH:MM")
-// → รองรับช่วงเวลาที่คร่อมเที่ยงคืนและอยู่คนละวันได้ถูกต้อง
-// → คืน false อัตโนมัติเมื่อมีค่าเป็น null (เช่น วันที่จันทร์ไม่ขึ้น/ไม่ตก) จึงไม่ต้องมี guard ภายนอก
+// แก้บั๊ก #1 (ฉบับถูกต้องตามความหมาย Solunar):
+// เทียบแบบ "เวลาในรอบวัน" (clock-time) เพราะ Solunar นับช่วงจันทร์เหนือหัว (เมอริเดียน)
+// และจันทร์ใต้เท้า (เมอริเดียนตรงข้าม = +12ชม.) ว่าเป็นของ "วันเดียวกัน"
+// พร้อมรองรับช่วงที่คร่อมเที่ยงคืน (บั๊กเดิม: เมื่อ start>end จะคืน false เสมอ)
+// หมายเหตุ: ผลลัพธ์ไม่ขึ้นกับ timezone ของเครื่อง (เป็นการเช็กสมาชิกบนวงกลม 24 ชม.)
 function isTimeBetween(timeToCheck, startTime, endTime) {
     if (!timeToCheck || !startTime || !endTime) return false;
-    const t = timeToCheck.getTime();
-    return t >= startTime.getTime() && t <= endTime.getTime();
+    const m = (d) => d.getHours() * 60 + d.getMinutes();
+    const t = m(timeToCheck), s = m(startTime), e = m(endTime);
+    return s <= e ? (t >= s && t <= e) : (t >= s || t <= e);
 }
