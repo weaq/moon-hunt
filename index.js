@@ -56,7 +56,12 @@ app.get('/api/moon-times', (req, res) => {
         const phName = phaseName(phase);
         const dark = computeDarkWindow(date, lat, lng); // ช่วงฟ้ามืดจริง
         const moonPosition = SunCalc.getMoonPosition(date, lat, lng);
-        const moonDistance = moonPosition.distance;
+        // ระยะใกล้สุดของวัน (สุ่มทุก 3 ชม.) ให้แม่นขึ้นสำหรับหา perigee/supermoon
+        let moonDistance = moonPosition.distance;
+        for (let hh = 3; hh < 24; hh += 3) {
+            const dd = SunCalc.getMoonPosition(new Date(date.getTime() + hh * 60 * 60 * 1000), lat, lng).distance;
+            if (dd < moonDistance) moonDistance = dd;
+        }
         const formattedDate = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
         const moonrise = moonTimes.rise ? moonTimes.rise.toLocaleString('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }) : null;
         const moonset = moonTimes.set ? moonTimes.set.toLocaleString('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }) : null;
@@ -91,7 +96,7 @@ app.get('/api/moon-times', (req, res) => {
             oneHourBeforeOppositeMeridian = new Date(oppositeMeridianPassing.getTime() - 60*60*1000);
             oneHourAfterOppositeMeridian = new Date(oppositeMeridianPassing.getTime() + 60*60*1000);
         }
-        const fmt = (d) => d ? d.toLocaleString('en-US',{timeZone:tz,hour:'2-digit',minute:'2-digit',hour12:false}) : null;
+        const fmt = (d) => (d && !isNaN(d.getTime())) ? d.toLocaleString('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }) : null;
         const formattedThirtyMinutesBeforeMoonrise = fmt(thirtyMinutesBeforeMoonrise);
         const formattedThirtyMinutesAfterMoonrise = fmt(thirtyMinutesAfterMoonrise);
         const formattedThirtyMinutesBeforeMoonset = fmt(thirtyMinutesBeforeMoonset);
@@ -142,6 +147,19 @@ app.get('/api/moon-times', (req, res) => {
         // เดิมเขียน if (illumination) แล้ว illumination > 0 && <= 10 ซึ่ง illumination เป็น object → NaN เลยไม่เคยทำงาน
         if (moonIllumination > 0 && moonIllumination <= 10) huntStar += 0.5;
 
+        // ===== ช่วงถ่ายภาพ: twilight ทุกเฟส (จาก SunCalc) =====
+        const dawn = fmt(sunTimes.dawn);                 // blue hour เช้า เริ่ม (civil)
+        const dusk = fmt(sunTimes.dusk);                 // blue hour เย็น จบ (civil)
+        const nauticalDawn = fmt(sunTimes.nauticalDawn);
+        const nauticalDusk = fmt(sunTimes.nauticalDusk);
+        const goldenHourEnd = fmt(sunTimes.goldenHourEnd); // golden hour เช้า จบ
+        const goldenHour = fmt(sunTimes.goldenHour);       // golden hour เย็น เริ่ม
+
+        // ===== ทิศที่ดวงจันทร์ขึ้น/ตก (azimuth) =====
+        let moonriseAz = null, moonsetAz = null;
+        if (moonTimes.rise) moonriseAz = azimuthInfo(SunCalc.getMoonPosition(moonTimes.rise, lat, lng).azimuth);
+        if (moonTimes.set) moonsetAz = azimuthInfo(SunCalc.getMoonPosition(moonTimes.set, lat, lng).azimuth);
+
         result.push({
             location: cleanlocation, timezone: tz, date: formattedDate,
             moonrise, moonset, meridianPassing: meridianTime, oppositeMeridianPassing: oppositeMeridianTime,
@@ -163,15 +181,55 @@ app.get('/api/moon-times', (req, res) => {
             darkDuration: dark.ms > 0
                 ? `${String(Math.floor(dark.ms / 3600000)).padStart(2, '0')}:${String(Math.floor((dark.ms % 3600000) / 60000)).padStart(2, '0')}`
                 : null,
+            // ช่วงถ่ายภาพ (twilight)
+            dawn, dusk, nauticalDawn, nauticalDusk, goldenHourEnd, goldenHour,
+            // ทิศจันทร์ขึ้น/ตก
+            moonriseAzimuth: moonriseAz ? moonriseAz.deg : null,
+            moonriseDir: moonriseAz ? moonriseAz.dir : null,
+            moonsetAzimuth: moonsetAz ? moonsetAz.deg : null,
+            moonsetDir: moonsetAz ? moonsetAz.dir : null,
             distance: moonDistance.toFixed(2) + ' meters',
+            distanceKm: Math.round(moonDistance),
             huntStar: huntStar,
             meridianTimesAvailable: (oneHourBeforeMeridian && oneHourAfterMeridian) ? true : false,
         });
     }
+
+    // ===== หาจุดใกล้/ไกลโลกของเดือน + ตรวจ Supermoon/Micromoon =====
+    if (result.length) {
+        const dists = result.map((r) => r.distanceKm);
+        const minD = Math.min(...dists), maxD = Math.max(...dists);
+        // วันเพ็ญของเดือน = วันที่แสงสว่างมากที่สุด
+        let fullIdx = 0;
+        result.forEach((r, i) => {
+            if (parseFloat(r.illumination) > parseFloat(result[fullIdx].illumination)) fullIdx = i;
+        });
+        result.forEach((r) => {
+            r.isPerigee = r.distanceKm === minD;  // ใกล้โลกสุดของเดือน
+            r.isApogee = r.distanceKm === maxD;   // ไกลโลกสุดของเดือน
+            r.supermoon = false;
+            r.micromoon = false;
+        });
+        // ติดธงเฉพาะ "วันเพ็ญของเดือน" ถ้าเป็นเพ็ญจริงและใกล้/ไกลสุดของเดือน
+        const f = result[fullIdx];
+        if (parseFloat(f.illumination) >= 97) {
+            if (f.distanceKm <= minD + 3000) f.supermoon = true;       // เพ็ญตรงกับช่วงใกล้โลก
+            else if (f.distanceKm >= maxD - 3000) f.micromoon = true;  // เพ็ญตรงกับช่วงไกลโลก
+        }
+    }
+
     res.json(result);
 });
 
 app.listen(port, () => { console.log(`Server running at http://localhost:${port}`); });
+
+// แปลง azimuth (เรเดียน, SunCalc วัดจากทิศใต้ตามเข็ม) → ทิศเข็มทิศ (0=N) + ชื่อทิศ 16 จุด
+function azimuthInfo(azRad) {
+    let deg = (azRad * 180 / Math.PI + 180) % 360;
+    if (deg < 0) deg += 360;
+    const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    return { deg: Math.round(deg), dir: dirs[Math.round(deg / 22.5) % 16] };
+}
 
 // ชื่อเฟสดวงจันทร์จากค่า phase (0=ดับ, 0.25=ขึ้นครึ่งดวง, 0.5=เพ็ญ, 0.75=แรมครึ่งดวง)
 function phaseName(phase) {
