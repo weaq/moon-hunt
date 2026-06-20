@@ -51,6 +51,10 @@ app.get('/api/moon-times', (req, res) => {
         }
         const illumination = SunCalc.getMoonIllumination(date);
         const moonIllumination = illumination.fraction * 100;
+        const phase = illumination.phase;          // 0..1
+        const waxing = phase < 0.5;                // ข้างขึ้น = true, ข้างแรม = false
+        const phName = phaseName(phase);
+        const dark = computeDarkWindow(date, lat, lng); // ช่วงฟ้ามืดจริง
         const moonPosition = SunCalc.getMoonPosition(date, lat, lng);
         const moonDistance = moonPosition.distance;
         const formattedDate = `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
@@ -151,6 +155,14 @@ app.get('/api/moon-times', (req, res) => {
             oneHourBeforeOppositeMeridian: formattedOneHourBeforeOppositeMeridian,
             oneHourAfterOppositeMeridian: formattedOneHourAfterOppositeMeridian,
             illumination: moonIllumination.toFixed(2),
+            phase: phase.toFixed(3),
+            phaseName: phName,
+            waxing: waxing,
+            darkStart: fmt(dark.start),
+            darkEnd: fmt(dark.end),
+            darkDuration: dark.ms > 0
+                ? `${String(Math.floor(dark.ms / 3600000)).padStart(2, '0')}:${String(Math.floor((dark.ms % 3600000) / 60000)).padStart(2, '0')}`
+                : null,
             distance: moonDistance.toFixed(2) + ' meters',
             huntStar: huntStar,
             meridianTimesAvailable: (oneHourBeforeMeridian && oneHourAfterMeridian) ? true : false,
@@ -160,6 +172,49 @@ app.get('/api/moon-times', (req, res) => {
 });
 
 app.listen(port, () => { console.log(`Server running at http://localhost:${port}`); });
+
+// ชื่อเฟสดวงจันทร์จากค่า phase (0=ดับ, 0.25=ขึ้นครึ่งดวง, 0.5=เพ็ญ, 0.75=แรมครึ่งดวง)
+function phaseName(phase) {
+    const p = ((phase % 1) + 1) % 1; // normalize 0..1
+    if (p < 0.03 || p > 0.97) return 'จันทร์ดับ';
+    if (p < 0.22) return 'ข้างขึ้น เสี้ยว';
+    if (p < 0.28) return 'ข้างขึ้น ครึ่งดวง';
+    if (p < 0.47) return 'ข้างขึ้น ค่อนดวง';
+    if (p < 0.53) return 'จันทร์เพ็ญ';
+    if (p < 0.72) return 'ข้างแรม ค่อนดวง';
+    if (p < 0.78) return 'ข้างแรม ครึ่งดวง';
+    return 'ข้างแรม เสี้ยว';
+}
+
+// ช่วง "ฟ้ามืดจริง" สำหรับดูดาว = กลางคืนดาราศาสตร์ (ดวงอาทิตย์ต่ำกว่า -18°)
+// ที่ดวงจันทร์อยู่ใต้ขอบฟ้าด้วย → คืนช่วงต่อเนื่องที่ยาวที่สุด
+function computeDarkWindow(date, lat, lng) {
+    const tonight = SunCalc.getTimes(date, lat, lng);
+    const tomorrow = SunCalc.getTimes(new Date(date.getTime() + 24 * 60 * 60 * 1000), lat, lng);
+    const nightStart = tonight.night;     // พลบค่ำดาราศาสตร์ (คืนนี้)
+    const nightEnd = tomorrow.nightEnd;   // รุ่งสางดาราศาสตร์ (เช้าพรุ่งนี้)
+    if (!nightStart || !nightEnd || isNaN(nightStart.getTime()) || isNaN(nightEnd.getTime()) || nightEnd <= nightStart) {
+        return { start: null, end: null, ms: 0 }; // ไม่มีคืนมืดสนิท (เช่น แถบขั้วโลกหน้าร้อน)
+    }
+    const step = 5 * 60 * 1000; // สุ่มทุก 5 นาที
+    let curStart = null, bestStart = null, bestEnd = null, bestLen = 0;
+    for (let t = nightStart.getTime(); t <= nightEnd.getTime(); t += step) {
+        const alt = SunCalc.getMoonPosition(new Date(t), lat, lng).altitude; // เรเดียน, < 0 = ใต้ขอบฟ้า
+        if (alt < 0) {
+            if (curStart === null) curStart = t;
+        } else if (curStart !== null) {
+            const len = t - curStart;
+            if (len > bestLen) { bestLen = len; bestStart = curStart; bestEnd = t - step; }
+            curStart = null;
+        }
+    }
+    if (curStart !== null) {
+        const len = nightEnd.getTime() - curStart;
+        if (len > bestLen) { bestLen = len; bestStart = curStart; bestEnd = nightEnd.getTime(); }
+    }
+    if (bestStart === null) return { start: null, end: null, ms: 0 }; // จันทร์อยู่บนฟ้าทั้งคืน
+    return { start: new Date(bestStart), end: new Date(bestEnd), ms: bestLen };
+}
 
 // แก้บั๊ก #1 (ฉบับถูกต้องตามความหมาย Solunar):
 // เทียบแบบ "เวลาในรอบวัน" (clock-time) เพราะ Solunar นับช่วงจันทร์เหนือหัว (เมอริเดียน)
