@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const SunCalc = require('suncalc');
 const tzlookup = require('tz-lookup'); // หา timezone จากพิกัด GPS (ออฟไลน์)
+const { computeSky } = require('./sky'); // ดาวเคราะห์/เคียงเดือน/อุปราคา
 const app = express();
 const port = process.env.PORT || 3000;
 app.use(express.json());
@@ -219,6 +220,41 @@ app.get('/api/moon-times', (req, res) => {
     }
 
     res.json(result);
+});
+
+// ── /api/sky — ท้องฟ้าดูดาวตามพิกัด GPS ──
+// ดาวเคราะห์ที่เห็นคืนนี้ (ถ้าไม่ส่ง date = คืนนี้) + ดาวเคียงเดือน + อุปราคาครั้งหน้า
+// GET /api/sky?location=lat,lng[&date=YYYY-MM-DD]
+app.get('/api/sky', (req, res) => {
+    const { location, date } = req.query;
+    if (!location) {
+        return res.status(400).json({ error: 'location (latitude,longitude) is required.' });
+    }
+    const clean = String(location).replace(/\s+/g, '');
+    const [latStr, lngStr] = clean.split(',');
+    const lat = parseFloat(latStr);
+    const lng = parseFloat(lngStr);
+    if (isNaN(lat) || isNaN(lng)) {
+        return res.status(400).json({ error: 'Invalid location format. Use "latitude,longitude".' });
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return res.status(400).json({ error: 'Coordinates out of range. lat: -90..90, lng: -180..180.' });
+    }
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD.' });
+    }
+    let tz;
+    try {
+        tz = tzlookup(lat, lng);
+    } catch (e) {
+        return res.status(400).json({ error: 'Could not determine timezone for the given coordinates.' });
+    }
+    try {
+        res.json(computeSky(lat, lng, tz, date || null));
+    } catch (e) {
+        console.error('sky error:', e);
+        res.status(500).json({ error: 'Failed to compute sky data.' });
+    }
 });
 
 app.listen(port, () => { console.log(`Server running at http://localhost:${port}`); });
