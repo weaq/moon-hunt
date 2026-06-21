@@ -7,6 +7,16 @@ const app = express();
 const port = process.env.PORT || 3000;
 app.use(express.json());
 
+// เปิด CORS — หน้าเว็บ (weaq.cc) ยิงข้าม origin มาที่ moon.weaq.cc/api ได้
+// เป็น API อ่านอย่างเดียว สาธารณะ จึงอนุญาตทุก origin
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+});
+
 app.get('/api/moon-times', (req, res) => {
     const { location, year, month } = req.query;
     const cleanlocation = location.replace(/\s+/g, '');
