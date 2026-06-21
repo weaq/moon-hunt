@@ -110,13 +110,16 @@ function computeSky(lat, lng, tz, dateStr) {
     const transit = A.SearchHourAngle(P.body, obs, 0, noon);
 
     const visible = best.alt > 5;
-    let when = null;
+    let when = null, whenKey = null;
     if (visible && best.t) {
       const frac = (best.t.getTime() - nightStart.getTime()) / nightMs;
       const allNight = firstUp && lastUp &&
         (firstUp.getTime() - nightStart.getTime()) < nightMs * 0.15 &&
         (nightEnd.getTime() - lastUp.getTime()) < nightMs * 0.15;
-      when = allNight ? 'เกือบทั้งคืน' : frac < 0.34 ? 'หัวค่ำ' : frac > 0.66 ? 'เช้ามืด' : 'กลางดึก';
+      if (allNight) { whenKey = 'mostNight'; when = 'เกือบทั้งคืน'; }
+      else if (frac < 0.34) { whenKey = 'evening'; when = 'หัวค่ำ'; }
+      else if (frac > 0.66) { whenKey = 'morning'; when = 'เช้ามืด'; }
+      else { whenKey = 'lateNight'; when = 'กลางดึก'; }
     }
 
     planets.push({
@@ -132,7 +135,8 @@ function computeSky(lat, lng, tz, dateStr) {
       azimuthAtMax: visible ? Math.round(best.az) : null,
       directionAtMax: visible ? dirName(best.az) : null,
       bestTime: visible ? F.t(best.t) : null,
-      when, // หัวค่ำ / กลางดึก / เช้ามืด / เกือบทั้งคืน
+      when, // หัวค่ำ / กลางดึก / เช้ามืด / เกือบทั้งคืน (ไทย)
+      whenKey, // evening / lateNight / morning / mostNight (สำหรับ i18n ฝั่ง frontend)
       note: visible
         ? `${when} ทาง${dirName(best.az)} สูงสุด ~${Math.round(best.alt)}°`
         : 'คืนนี้อยู่ใต้/เกือบขอบฟ้า ไม่เหมาะดู',
