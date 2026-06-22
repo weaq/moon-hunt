@@ -110,51 +110,58 @@ app.get('/api/moon-times', (req, res) => {
         const oneHourBeforeOppositeMeridian = off(oppositeMeridianPassing, -H);
         const oneHourAfterOppositeMeridian  = off(oppositeMeridianPassing, +H);
 
-        // ===== huntStar — สกอร์แบบ Time-step (เอารอบเวลาเป็นตัวตั้ง แล้วนับว่าชนกี่เงื่อนไข) =====
-        // เดินไทม์ไลน์ตลอดวันทีละ STEP แต่ละจุดเช็คว่าตกอยู่ในหน้าต่างใดบ้าง แล้วบวกความเข้ม
-        // - Major (เหนือหัว/ใต้เท้า, ±1ชม.) น้ำหนัก 2 ต่อช่วงที่ชน
-        // - Minor (จันทร์ขึ้น/ตก, ±30นาที) น้ำหนัก 1 ต่อช่วงที่ชน
-        // - อยู่ในช่วงพลบ/รุ่ง (sunrise/sunset ±1ชม.) = amplify ×2  (หลัก amplification ของ Solunar)
-        // - เฟส ดับ/เพ็ญ ดันแรง ×(1+syzygy)  (สมมาตร new=full ตามทฤษฎี)
-        // รวมแบบ integrate (ความเข้ม × เศษชั่วโมง) → ทนต่อการขยับขอบหน้าต่างเล็กน้อย = เสถียร
-        const majorWins = [
-            [oneHourBeforeMeridian, oneHourAfterMeridian],
-            [oneHourBeforeOppositeMeridian, oneHourAfterOppositeMeridian],
-        ].filter(w => w[0] && w[1]);
-        const minorWins = [
-            [thirtyMinutesBeforeMoonrise, thirtyMinutesAfterMoonrise],
-            [thirtyMinutesBeforeMoonset, thirtyMinutesAfterMoonset],
-        ].filter(w => w[0] && w[1]);
-        const twilightWins = [];
-        if (sunTimes.sunrise) twilightWins.push([off(sunTimes.sunrise, -H), off(sunTimes.sunrise, +H)]);
-        if (sunTimes.sunset)  twilightWins.push([off(sunTimes.sunset, -H), off(sunTimes.sunset, +H)]);
-
+        // ===== huntStar — ให้คะแนนตามกฎ 4 ข้อ (อ้างอิงทฤษฎี Solunar) =====
+        // เดินไทม์ไลน์ทีละ STEP ให้คะแนนเฉพาะ "ช่วงสำคัญ" (Major/Minor) แล้วบวกโบนัสตามเงื่อนไข
+        //  กฎ1 Major: จันทร์เหนือหัว ±1ชม. และ ใต้เท้า ±1ชม.  → +2
+        //  กฎ2 Minor: จันทร์ขึ้น ±30น. และ ตก ±30น.        → +1
+        //  กฎ3 ช่วงสำคัญใกล้พระอาทิตย์ขึ้น/ตก: ≤30น. → +3, 30–60น. → +2 ; และถ้าตรงจันทร์ขึ้น/ตกด้วย → +1
+        //  กฎ4 เฟส New(0–10%)/Full(90–100%) = ดับ/เพ็ญ ±3 วัน → คูณทั้งวัน ×1.5
         const STEP = 10 * MIN;
         const inWin = (t, w) => t >= w[0].getTime() && t <= w[1].getTime();
-        const countHits = (t, wins) => wins.reduce((n, w) => n + (inWin(t, w) ? 1 : 0), 0);
+        const inAny = (t, wins) => wins.some(w => inWin(t, w));
 
-        let huntStar = 0;
-        let majorMinutes = 0, minorMinutes = 0, amplifiedMinutes = 0, peakHits = 0;
+        const majorWins = [
+            [oneHourBeforeMeridian, oneHourAfterMeridian],              // เหนือหัว ±1ชม.
+            [oneHourBeforeOppositeMeridian, oneHourAfterOppositeMeridian], // ใต้เท้า ±1ชม.
+        ].filter(w => w[0] && w[1]);
+        const minorWins = [
+            [thirtyMinutesBeforeMoonrise, thirtyMinutesAfterMoonrise],  // จันทร์ขึ้น ±30น.
+            [thirtyMinutesBeforeMoonset, thirtyMinutesAfterMoonset],    // จันทร์ตก ±30น.
+        ].filter(w => w[0] && w[1]);
+        const sunMarks = [];
+        if (sunTimes.sunrise) sunMarks.push(sunTimes.sunrise.getTime());
+        if (sunTimes.sunset)  sunMarks.push(sunTimes.sunset.getTime());
+        const sunNear = (t) => sunMarks.length ? Math.min(...sunMarks.map(s => Math.abs(t - s))) : Infinity;
+
+        let raw = 0;
+        let majorMinutes = 0, minorMinutes = 0, sunBonusMinutes = 0, peakHits = 0;
         for (let t = dayStartMs; t < dayStartMs + 24 * H; t += STEP) {
-            const majorHit = countHits(t, majorWins);
-            const minorHit = countHits(t, minorWins);
-            const solunarWeight = majorHit * 2 + minorHit * 1;
-            if (solunarWeight === 0) continue;
+            const inMajor = inAny(t, majorWins);   // ข้อ1: T ห่าง moonTransit/AntiTransit ≤1ชม.
+            const inMinor = inAny(t, minorWins);   // ข้อ2: T ห่าง moonRise/moonDrop ≤30น.
+            const sn = sunNear(t);                  // ข้อ3: T ห่าง sunRise/sunSet
 
-            const twiHit = countHits(t, twilightWins);
-            const amp = twiHit > 0 ? 2 : 1;                  // ทับช่วงพลบ/รุ่ง = แรงขึ้น
-            const intensity = solunarWeight * amp * (1 + syzygy);
-            huntStar += intensity * (STEP / H);              // integrate → หน่วย "ชม.ถ่วงน้ำหนัก"
+            let pts = 0;
+            if (inMajor) pts += 2;                              // ข้อ1 +2
+            if (inMinor) pts += 1;                              // ข้อ2 +1
+            if (sn <= 30 * MIN) pts += 3;                       // ข้อ3 ≤30น. +3
+            else if (sn <= 60 * MIN) pts += 2;                  // ข้อ3 31–60น. +2
+            if (inMinor && sn <= 30 * MIN) pts += 1;            // Bonus นาทีทอง: ข้อ2 + ข้อ3(≤30น.) พร้อมกัน +1
+            if (pts === 0) continue;
+            raw += pts * (STEP / H);                            // integrate → หน่วย "ชม.ถ่วงน้ำหนัก"
 
             // breakdown ไว้ debug/แสดงผล
             const stepMin = STEP / MIN;
-            if (majorHit) majorMinutes += stepMin;
-            else if (minorHit) minorMinutes += stepMin;
-            if (twiHit) amplifiedMinutes += stepMin;
-            const totalHits = majorHit + minorHit + twiHit;
-            if (totalHits > peakHits) peakHits = totalHits;
+            if (inMajor) majorMinutes += stepMin; else if (inMinor) minorMinutes += stepMin;
+            if (sn <= 60 * MIN) sunBonusMinutes += stepMin;
+            const hits = (inMajor ? 1 : 0) + (inMinor ? 1 : 0) + (sn <= 60 * MIN ? 1 : 0);
+            if (hits > peakHits) peakHits = hits;
         }
-        huntStar = Math.round(huntStar * 100) / 100;
+        // Phase (ข้อ4): ใกล้ดับ/เพ็ญ = ×1.5 (ช่วง 0–10%/90–100% ตามตาราง) แล้วไล่ระดับลงถึง ×1.0 ที่ครึ่งดวง
+        //   ไล่ระดับช่วงกลางเพื่อให้ดาวกระจายเต็ม 1–5 แทนที่จะกระโดดเป็น 2 กลุ่ม
+        const dPhase = Math.min(moonIllumination, 100 - moonIllumination); // 0=ดับ/เพ็ญ, 50=ครึ่งดวง
+        const phaseMult = dPhase <= 10 ? 1.5 : (1.0 + 0.5 * (50 - dPhase) / 40);
+        const phaseFavorable = dPhase <= 10; // ดับ/เพ็ญ ±3วัน (0–10% หรือ 90–100%)
+        let huntStar = Math.round(raw * phaseMult * 100) / 100;
 
         // ===== ช่วงถ่ายภาพ: twilight ทุกเฟส (จาก SunCalc) =====
         const dawn = fmt(sunTimes.dawn);
@@ -200,7 +207,7 @@ app.get('/api/moon-times', (req, res) => {
             distanceKm: Math.round(moonDistance),
             huntStar: huntStar,
             huntDetail: {
-                majorMinutes, minorMinutes, amplifiedMinutes, peakHits,
+                majorMinutes, minorMinutes, sunBonusMinutes, peakHits, phaseFavorable,
                 upperTransit: fmt(meridianPassing),
                 lowerTransit: fmt(oppositeMeridianPassing),
             },
@@ -208,17 +215,20 @@ app.get('/api/moon-times', (req, res) => {
         });
     }
 
-    // ===== สรุปรายเดือน: ให้ "ดาว 1–5" แบบเทียบกันในเดือน + perigee/supermoon =====
+    // ===== สรุปรายเดือน: ให้ "ดาว 1–5" แบบ absolute + perigee/supermoon =====
     if (result.length) {
         const dists = result.map((r) => r.distanceKm);
         const minD = Math.min(...dists), maxD = Math.max(...dists);
 
-        // ดาว 1–5 เทียบกับช่วงคะแนนของเดือนนี้ (วันดีสุด=5, วันแย่สุด=1)
-        const scores = result.map((r) => r.huntStar);
-        const mx = Math.max(...scores), mn = Math.min(...scores);
+        // ดาว 1–5 แบบ %-of-max (สัมบูรณ์): เทียบกับ "ช่วงคะแนนที่เป็นไปได้จริงตามทฤษฎี"
+        //   FLOOR = วันแย่สุด (มีแค่ช่วงสำคัญ ไม่ตรงพระอาทิตย์ + ครึ่งดวง)
+        //   CEIL  = วันสมบูรณ์แบบ (Major+Minor+พระอาทิตย์เรียงตรง + ดับ/เพ็ญ)
+        //   จาก calibration ข้อมูลจริง ~5,800 วัน 4 พิกัด 4 ปี: FLOOR≈13, CEIL≈29
+        //   ดาว = % ของเพดาน แบ่งทุก 20% → 5★ = ≥80% (ใกล้วันในอุดมคติ, หายากจริง; เดือนห่วยได้ดาวต่ำตามจริง)
+        const STAR_FLOOR = 13, STAR_CEIL = 29;
         result.forEach((r) => {
-            const norm = mx > mn ? (r.huntStar - mn) / (mx - mn) : 1;
-            r.stars = Math.max(1, Math.min(5, Math.round(norm * 4) + 1));
+            const pct = (r.huntStar - STAR_FLOOR) / (STAR_CEIL - STAR_FLOOR); // 0..1
+            r.stars = Math.max(1, Math.min(5, Math.floor(pct / 0.2) + 1));
         });
 
         // วันเพ็ญของเดือน = วันที่แสงสว่างมากที่สุด
